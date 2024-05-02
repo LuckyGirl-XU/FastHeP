@@ -12,6 +12,10 @@ This repo is the open-sourced code for the proposed TecHNet
     - pytorch >= 1.8.1
     - dgl >= 0.6.1
 
+# Clone the Repository:
+
+    git clone https://github.com/LuckyGirl-XU/TecHNet.git
+    cd TecHNet
 
 # Datasets
    We collect the following eight datasets from https://www.cs.cornell.edu/~arb/data/. 
@@ -32,11 +36,7 @@ This repo is the open-sourced code for the proposed TecHNet
      cd HG_Data/
      unzip [dataset_name].zip
 
-# Clone the Repository:
-
-    git clone https://github.com/LuckyGirl-XU/TecHNet.git
-    cd TecHNet
-
+     
 # Run Examples
   ## Hyperedge prediction in transductive setting
   
