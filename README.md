@@ -20,7 +20,7 @@ This repo is the open-sourced code for the proposed TecHNet
     - the network of congress cosponsoring bills
         Congress bills
     - email networks 
-        Email Enron
+        Email-Enron
     - social networks 
         Users-Threads, Threads-Math-Sx, Threads-Stack-Overflow
     - co-authorship on DBLP 
