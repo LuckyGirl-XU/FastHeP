@@ -14,9 +14,17 @@ This repo is the open-sourced code for the proposed TecHNet
 
 
 # Datasets
-    The datasets are used in this paper:
-
-- We collect eight datasets from (https://www.cs.cornell.edu/~arb/data/).
+    We collect eight datasets from (https://www.cs.cornell.edu/~arb/data/).
+    - drug networks
+        NDC-classes, NDC-Substances
+    - the network of congress cosponsoring bills
+        Congress bills
+    - email networks 
+        Email Enron
+    - social networks 
+        Users-Threads, Threads-Math-Sx, Threads-Stack-Overflow
+    - co-authorship on DBLP 
+        Coauth-DBLP
 
 # Clone the Repository:
 
