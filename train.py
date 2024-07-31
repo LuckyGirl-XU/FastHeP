@@ -78,7 +78,7 @@ def train_val(train_val_data, model, mode, bs, epochs, criterion, optimizer, ear
         all_network_time.append(network_time)
     train_end = time.time()
     train_time.append(train_end - train_start)
-    TecHNet_results(logger, train_time, "train_time")
+    FastHeP_results(logger, train_time, "train_time")
     # validation phase use all information
     val_start = time.time()
     val_acc, val_ap, val_f1, val_auc, _, _ = eval_one_epoch('val for {} nodes'.format(mode), model, val_rand_sampler, val_data)
