@@ -3,7 +3,7 @@ import sys
 
 
 def get_args():
-  parser = argparse.ArgumentParser('Interface for TecHNet')
+  parser = argparse.ArgumentParser('Interface for FastHeP')
 
   # select dataset and training mode
   parser.add_argument('-d', '--data', type=str, help= "email-Enron")
