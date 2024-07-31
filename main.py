@@ -4,7 +4,7 @@ from parser import *
 from eval import *
 from utils import *
 from train import *
-from module import FastHeP
+from module import fasthyeP
 import resource
 import torch.nn as nn
 import statistics
@@ -156,40 +156,40 @@ for run in range(args.run):
   
 
   total_start = time.time()
-  technet = TecHNet(n_feat, e_feat, memory_dim, max_idx, time_dim=TIME_DIM, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=num_neighbors, dropout=DROP_OUT,
+  fasthye = fasthyeP(n_feat, e_feat, memory_dim, max_idx, time_dim=TIME_DIM, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=num_neighbors, dropout=DROP_OUT,
     linear_out=args.linear_out, get_checkpoint_path=get_checkpoint_path, get_ngh_store_path=get_ngh_store_path, get_self_rep_path=get_self_rep_path, get_prev_raw_path=get_prev_raw_path, verbosity=VERBOSITY,
   n_hops=NUM_HOP, replace_prob=REPLACE_PROB, self_dim=SELF_DIM, ngh_dim=NGH_DIM, device=device)
 
   if PRETRAINED:
     logger.info('Lodaing pretrained model...')
     pretrained_model_path = "pretrained_models/"+ DATA +"/best-model.pth"
-    technet.load_state_dict(torch.load(pretrained_model_path))
-  technet.to(device)
-  technet.reset_store()#作用是什么
+    fasthye.load_state_dict(torch.load(pretrained_model_path))
+  fasthye.to(device)
+  fasthye.reset_store()#作用是什么
 
-  optimizer = torch.optim.Adam(technet.parameters(), lr=LEARNING_RATE)
+  optimizer = torch.optim.Adam(fasthye.parameters(), lr=LEARNING_RATE)
   criterion = torch.nn.BCELoss()
   early_stopper = EarlyStopMonitor(tolerance=TOLERANCE)
 
   # start train and val phases
   if not PRETRAINED:
-      train_val(train_val_data, technet, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, he_infos, rand_samplers, logger, model_dim, n_hop=NUM_HOP)
+      train_val(train_val_data, fasthye, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, he_infos, rand_samplers, logger, model_dim, n_hop=NUM_HOP)
 
   # final testing
   print("_*"*50)
-  technet.reset_store()
-  technet.reset_self_rep()
+  fasthye.reset_store()
+  fasthye.reset_self_rep()
 
   test_start = time.time()
-  test_acc, test_ap, test_f1, test_auc, test_neighbr_time, test_network_time = eval_one_epoch('test for {} nodes'.format(args.mode), technet, test_rand_sampler, test_data)
+  test_acc, test_ap, test_f1, test_auc, test_neighbr_time, test_network_time = eval_one_epoch('test for {} nodes'.format(args.mode), fasthye, test_rand_sampler, test_data)
   test_end = time.time()
   logger.info('Test statistics: {} all nodes -- auc: {}, ap: {}, acc: {}, f1: {}, time: {}'.format(args.mode, test_auc, test_ap, test_acc, test_f1, test_end - test_start))
   logger.info("neighbor time: {}".format(test_neighbr_time))
   logger.info('message passing time: {}'.format(test_network_time))
   if args.mode == 'i':
-    technet.reset_store()
-    technet.reset_self_rep()
-    test_new_old_acc, test_new_old_ap, test_new_old_f1, test_new_old_auc, test_new_neighbr_time, test_new_network_time = eval_one_epoch('test for {} nodes'.format(args.mode), technet, test_rand_sampler, test_new_old_data)
+    fasthye.reset_store()
+    fasthye.reset_self_rep()
+    test_new_old_acc, test_new_old_ap, test_new_old_f1, test_new_old_auc, test_new_neighbr_time, test_new_network_time = eval_one_epoch('test for {} nodes'.format(args.mode), fasthye, test_rand_sampler, test_new_old_data)
     logger.info('Test statistics: {} new_old nodes -- auc: {}, ap: {}, acc: {}, f1: {}'.format(args.mode, test_new_old_auc, test_new_old_ap, test_new_old_acc, test_new_old_f1))
     logger.info("neighbor time: {}".format( test_new_neighbr_time ))
     logger.info('message passing time: {}'.format(test_new_network_time))
@@ -203,21 +203,21 @@ for run in range(args.run):
   test_times.append(test_end - test_start)
   early_stoppers.append(early_stopper.best_epoch + 1)
   # save model
-  logger.info('Saving TecHNet model ...')
-  torch.save(technet.state_dict(), best_model_path)
-  logger.info('TecHNet model saved')
+  logger.info('Saving fasthyeP model ...')
+  torch.save(fasthye.state_dict(), best_model_path)
+  logger.info('fasthyeP model saved')
 
   
   total_end = time.time()
-  print("TecHNet experiment statistics:")
+  print("fasthyeP experiment statistics:")
   if args.mode == "t":
-    TecHNet_results(logger, transductive_auc, "transductive_auc")
-    TecHNet_results(logger, transductive_ap, "transductive_ap")
+    fasthyeP_results(logger, transductive_auc, "transductive_auc")
+    fasthyeP_results(logger, transductive_ap, "transductive_ap")
   else:
-    TecHNet_results(logger, inductive_auc, "inductive_auc")
-    TecHNet_results(logger, inductive_ap, "inductive_ap")
+    fasthyeP_results(logger, inductive_auc, "inductive_auc")
+    fasthyeP_results(logger, inductive_ap, "inductive_ap")
   
-  TecHNet_results(logger, test_times, "test_times")
-  TecHNet_results(logger, early_stoppers, "early_stoppers")
+  fasthyeP_results(logger, test_times, "test_times")
+  fasthyeP_results(logger, early_stoppers, "early_stoppers")
   total_time.append(total_end - total_start)
-  TecHNet_results(logger, total_time, "total_time")
+  fasthyeP_results(logger, total_time, "total_time")
