@@ -278,6 +278,7 @@ class TecHNet(torch.nn.Module):
     hy_p_embed = self.set_embedding(node_embed[:bs], he_offset_l)
     hy_n_embed = self.set_embedding(node_embed[bs:], he_offset_l)
 
+
     p_score = self.out_layer(hy_p_embed).squeeze_(dim=-1)
     n_score = self.out_layer(hy_n_embed).squeeze_(dim=-1)
     return p_score, n_score
@@ -339,7 +340,7 @@ class Hyperedge_Attention(nn.Module):
     def forward(self, x, offset):
         
         hyper_tokens = self.hyper2token(x, offset)
-        x= self.hyper_attention(hyper_tokens,hyper_tokens,hyper_tokens)[0].squeeze(0)
+        x= hyper_tokens+ self.hyper_attention(hyper_tokens,hyper_tokens,hyper_tokens)[0].squeeze(0)
         return x
     
     
