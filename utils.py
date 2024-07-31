@@ -208,7 +208,7 @@ def process_sampling_numbers(num_neighbors, num_layers):
     num_layers = len(num_neighbors)
   return num_neighbors, num_layers
 
-def TecHNet_results(logger, arr, name):
+def FastHeP_results(logger, arr, name):
   logger.info(name + " " + str(arr))
   logger.info("Mean " + str(100 * statistics.mean(arr)))
   logger.info("Standard deviation " + str(statistics.pstdev(arr)))
