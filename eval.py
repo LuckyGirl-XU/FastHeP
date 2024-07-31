@@ -7,10 +7,10 @@ from sklearn.metrics import roc_auc_score
 from utils import *
 
 
-def eval_one_epoch(hint, technet, sampler, he_info, bs = 100):
+def eval_one_epoch(hint, fasthye, sampler, he_info, bs = 100):
   val_acc, val_ap, val_f1, val_auc, val_neigh_time, val_network_time = [], [], [], [], [], []
   with torch.no_grad():
-    technet = technet.eval()
+    fasthye = fasthye.eval()
     TEST_BATCH_SIZE = bs
     num_test_instance = len(he_info)
 
@@ -27,7 +27,7 @@ def eval_one_epoch(hint, technet, sampler, he_info, bs = 100):
      
       bad_l_cut = sampler.sample(src_l_cut, he_offset_l_cut)
 
-      pos_prob, neg_prob, neigh_time, network_time = technet.contrast(src_l_cut, bad_l_cut, he_offset_l_cut, ts_l_cut, test = True)
+      pos_prob, neg_prob, neigh_time, network_time = fasthye.contrast(src_l_cut, bad_l_cut, he_offset_l_cut, ts_l_cut, test = True)
      
       pred_score = np.concatenate([(pos_prob).cpu().numpy(), (neg_prob).cpu().numpy()])
       
