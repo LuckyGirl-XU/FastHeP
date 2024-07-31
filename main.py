@@ -4,7 +4,7 @@ from parser import *
 from eval import *
 from utils import *
 from train import *
-from module import TecHNet
+from module import FastHeP
 import resource
 import torch.nn as nn
 import statistics
