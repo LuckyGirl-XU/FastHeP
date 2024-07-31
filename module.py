@@ -10,7 +10,7 @@ from torch.utils.data import WeightedRandomSampler
 from torch.nn.utils.rnn import pad_sequence
 from Attention import *
 
-class TecHNet(torch.nn.Module):
+class FastHeP(torch.nn.Module):
   def __init__(self, n_feat, e_feat, memory_dim, total_nodes, get_checkpoint_path=None, get_ngh_store_path=None, get_self_rep_path=None, get_prev_raw_path=None, time_dim=64, pos_dim=0, n_head=1, num_neighbors=['1', '16'],
       dropout=0.1, linear_out=False, verbosity=1, seed=1, n_hops=1, replace_prob=0.8, self_dim=100, ngh_dim=8, device=None):
     super(TecHNet, self).__init__()
