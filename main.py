@@ -4,7 +4,7 @@ from parser import *
 from eval import *
 from utils import *
 from train import *
-from module import fasthyeP
+from module import FastHeP
 import resource
 import torch.nn as nn
 import statistics
@@ -156,7 +156,7 @@ for run in range(args.run):
   
 
   total_start = time.time()
-  fasthye = fasthyeP(n_feat, e_feat, memory_dim, max_idx, time_dim=TIME_DIM, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=num_neighbors, dropout=DROP_OUT,
+  fasthye = FastHeP(n_feat, e_feat, memory_dim, max_idx, time_dim=TIME_DIM, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=num_neighbors, dropout=DROP_OUT,
     linear_out=args.linear_out, get_checkpoint_path=get_checkpoint_path, get_ngh_store_path=get_ngh_store_path, get_self_rep_path=get_self_rep_path, get_prev_raw_path=get_prev_raw_path, verbosity=VERBOSITY,
   n_hops=NUM_HOP, replace_prob=REPLACE_PROB, self_dim=SELF_DIM, ngh_dim=NGH_DIM, device=device)
 
@@ -203,21 +203,21 @@ for run in range(args.run):
   test_times.append(test_end - test_start)
   early_stoppers.append(early_stopper.best_epoch + 1)
   # save model
-  logger.info('Saving fasthyeP model ...')
+  logger.info('Saving FastHeP model ...')
   torch.save(fasthye.state_dict(), best_model_path)
-  logger.info('fasthyeP model saved')
+  logger.info('FastHeP model saved')
 
   
   total_end = time.time()
-  print("fasthyeP experiment statistics:")
+  print("FastHeP experiment statistics:")
   if args.mode == "t":
-    fasthyeP_results(logger, transductive_auc, "transductive_auc")
-    fasthyeP_results(logger, transductive_ap, "transductive_ap")
+    FastHeP_results(logger, transductive_auc, "transductive_auc")
+    FastHeP_results(logger, transductive_ap, "transductive_ap")
   else:
-    fasthyeP_results(logger, inductive_auc, "inductive_auc")
-    fasthyeP_results(logger, inductive_ap, "inductive_ap")
+    FastHeP_results(logger, inductive_auc, "inductive_auc")
+    FastHeP_results(logger, inductive_ap, "inductive_ap")
   
-  fasthyeP_results(logger, test_times, "test_times")
-  fasthyeP_results(logger, early_stoppers, "early_stoppers")
+  FastHeP_results(logger, test_times, "test_times")
+  FastHeP_results(logger, early_stoppers, "early_stoppers")
   total_time.append(total_end - total_start)
-  fasthyeP_results(logger, total_time, "total_time")
+  FastHeP_results(logger, total_time, "total_time")
