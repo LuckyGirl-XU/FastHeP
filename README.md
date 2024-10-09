@@ -44,4 +44,10 @@ This repo is the open-sourced code for the proposed FastHeP
 
 # Official Code Links for All Baselines:
 - CATWalk: https://github.com/ubc-systopia/CATWalk
+- NHP: https://drive.google.com/file/d/1pgSPvv6Y23X5cPiShCpF4bU8eqz_34YE/view
+- HyperSAGCN: https://github.com/ma-compbio/Hyper-SAGNN
+- CHESHIRE: https://github.com/canc1993/cheshire-gapfilling
+- CE-CAW: https://github.com/snap-stanford/CAW
+- CE-Zebra: https://github.com/LuckyLYM/Zebra
+- CE-Orca: https://github.com/LuckyLYM/Orca
 
