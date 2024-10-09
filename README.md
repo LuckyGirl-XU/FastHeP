@@ -41,3 +41,7 @@ This repo is the open-sourced code for the proposed FastHeP
   
     python main.py -d email-Enron --bs 100 --n_degree 16 --n_hop 1 --mode i --replace_prob 0.8 --gpu 1 --run 1 --split 0.7  
 
+
+# Official Code Links for All Baselines:
+- CATWalk: https://github.com/ubc-systopia/CATWalk
+
