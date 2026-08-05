@@ -11,9 +11,15 @@ def get_args():
 
   parser.add_argument('--n_degree', nargs='*', default=['16'],
             help='a list of neighbor sampling numbers for different hops, when only a single element is input n_layer will be activated')
-  parser.add_argument('--n_hop', type=int, default=2, help='number of hops the HCNR scheme is used')
+  parser.add_argument('--n_hop', type=int, default=1, choices=[0, 1], help='number of hops used by the FastHeP neighbor store')
   parser.add_argument('--bias', default=0.0, type=float, help='the hyperparameter alpha controlling sampling preference with time closeness, default to 0 which is uniform sampling')
   parser.add_argument('--pos_dim', type=int, default=0, help='dimension of the positional embedding')
+  parser.add_argument('--neg_pos_mode', type=str, default='shared', choices=['separate', 'shared'],
+            help='share hop positions across labels (default) or reproduce the released label-revealing encoding')
+  parser.add_argument('--time_mode', type=str, default='relative', choices=['relative', 'absolute'],
+            help='encode the query-to-history time difference (default) or the stored absolute timestamp')
+  parser.add_argument('--joint_overlap', type=str, default='on', choices=['on', 'off'],
+            help='add a label-independent shared-neighbor structural feature within each candidate hyperedge')
   parser.add_argument('--self_dim', type=int, default=100, help='dimension of the self representation')
   parser.add_argument('--ngh_dim', type=int, default=4, help='dimension of the HCNR scheme')
   parser.add_argument('--linear_out', action='store_true', default=False, help="whether to linearly project each node's ")

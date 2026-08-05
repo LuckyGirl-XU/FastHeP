@@ -21,6 +21,9 @@ DATA = args.data
 NUM_HOP = args.n_hop
 LEARNING_RATE = args.lr
 POS_DIM = args.pos_dim
+NEG_POS_MODE = args.neg_pos_mode
+TIME_MODE = args.time_mode
+JOINT_OVERLAP = args.joint_overlap == 'on'
 TOLERANCE = args.tolerance
 VERBOSITY = args.verbosity
 SEED = args.seed
@@ -39,6 +42,11 @@ SPLIT = args.split
 
 set_random_seed(SEED)
 logger, get_checkpoint_path, get_ngh_store_path, get_self_rep_path, get_prev_raw_path, best_model_path, best_model_ngh_store_path = set_up_logger(args, sys_argv)
+
+if NEG_POS_MODE == 'separate':
+  logger.warning(
+    'Using legacy separate positive/negative positional ranges. '
+    'This reveals the sample type and is not a leakage-free evaluation.')
 
 
 
@@ -158,7 +166,8 @@ for run in range(args.run):
   total_start = time.time()
   fasthye = FastHeP(n_feat, e_feat, memory_dim, max_idx, time_dim=TIME_DIM, pos_dim=POS_DIM, n_head=ATTN_NUM_HEADS, num_neighbors=num_neighbors, dropout=DROP_OUT,
     linear_out=args.linear_out, get_checkpoint_path=get_checkpoint_path, get_ngh_store_path=get_ngh_store_path, get_self_rep_path=get_self_rep_path, get_prev_raw_path=get_prev_raw_path, verbosity=VERBOSITY,
-  n_hops=NUM_HOP, replace_prob=REPLACE_PROB, self_dim=SELF_DIM, ngh_dim=NGH_DIM, device=device)
+  n_hops=NUM_HOP, replace_prob=REPLACE_PROB, self_dim=SELF_DIM, ngh_dim=NGH_DIM,
+  neg_pos_mode=NEG_POS_MODE, time_mode=TIME_MODE, joint_overlap=JOINT_OVERLAP, device=device)
 
   if PRETRAINED:
     logger.info('Lodaing pretrained model...')
@@ -177,18 +186,19 @@ for run in range(args.run):
 
   # final testing
   print("_*"*50)
-  fasthye.reset_store()
-  fasthye.reset_self_rep()
-
   test_start = time.time()
+  if args.mode == 'i':
+    pre_test_store = [store.clone() for store in fasthye.neighborhood_store]
+    pre_test_self_rep = fasthye.self_rep.clone()
+    pre_test_prev_raw = fasthye.prev_raw.clone()
   test_acc, test_ap, test_f1, test_auc, test_neighbr_time, test_network_time = eval_one_epoch('test for {} nodes'.format(args.mode), fasthye, test_rand_sampler, test_data)
   test_end = time.time()
   logger.info('Test statistics: {} all nodes -- auc: {}, ap: {}, acc: {}, f1: {}, time: {}'.format(args.mode, test_auc, test_ap, test_acc, test_f1, test_end - test_start))
   logger.info("neighbor time: {}".format(test_neighbr_time))
   logger.info('message passing time: {}'.format(test_network_time))
   if args.mode == 'i':
-    fasthye.reset_store()
-    fasthye.reset_self_rep()
+    fasthye.set_neighborhood_store([store.clone() for store in pre_test_store])
+    fasthye.set_self_rep(pre_test_self_rep.clone(), pre_test_prev_raw.clone())
     test_new_old_acc, test_new_old_ap, test_new_old_f1, test_new_old_auc, test_new_neighbr_time, test_new_network_time = eval_one_epoch('test for {} nodes'.format(args.mode), fasthye, test_rand_sampler, test_new_old_data)
     logger.info('Test statistics: {} new_old nodes -- auc: {}, ap: {}, acc: {}, f1: {}'.format(args.mode, test_new_old_auc, test_new_old_ap, test_new_old_acc, test_new_old_f1))
     logger.info("neighbor time: {}".format( test_new_neighbr_time ))

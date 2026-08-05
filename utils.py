@@ -152,8 +152,10 @@ class RandHyperEdgeSampler(object):
 
             #keep half of the nodes in the source hyperedge and replace the rest
             n_kept_nodes, n_random_nodes = he_size//2, he_size - he_size//2
-            kept_nodes = np.random.choice(he_nodes, n_kept_nodes)
-            random_nodes = np.random.choice(remained_nodes, n_random_nodes)
+            kept_nodes = np.random.choice(he_nodes, n_kept_nodes, replace=False)
+            random_nodes = np.random.choice(
+                remained_nodes, n_random_nodes,
+                replace=len(remained_nodes) < n_random_nodes)
 
             fake_src_l.extend(kept_nodes)
             fake_src_l.extend(random_nodes)

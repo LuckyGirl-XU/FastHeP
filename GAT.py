@@ -152,8 +152,11 @@ class GATLayerImp3(GATLayer):
                       add_skip_connection, bias, log_attention_weights)
 
     def forward(self, data):
-        
-        in_nodes_features, edge_index, num_of_nodes = data  
+        if len(data) == 4:
+            in_nodes_features, edge_index, num_of_nodes, query_features = data
+        else:
+            in_nodes_features, edge_index, num_of_nodes = data
+            query_features = None
         
         assert edge_index.shape[0] == 2, f'Expected edge index with shape=(2,E) got {edge_index.shape}'
 
@@ -164,20 +167,25 @@ class GATLayerImp3(GATLayer):
         nodes_features_proj = self.dropout(nodes_features_proj)  # in the official GAT imp they did dropout here as well
       
         scores_source = (nodes_features_proj * self.scoring_fn_source).sum(dim=-1)
-        scores_target = (nodes_features_proj * self.scoring_fn_target).sum(dim=-1)
+        if query_features is None:
+            scores_target_lifted = (nodes_features_proj * self.scoring_fn_target).sum(dim=-1)
+        else:
+            query_features_proj = self.linear_proj(query_features).view(
+                -1, self.num_of_heads, self.num_out_features)
+            target_features = query_features_proj.index_select(
+                self.nodes_dim, edge_index[self.trg_nodes_dim])
+            scores_target_lifted = (target_features * self.scoring_fn_target).sum(dim=-1)
 
-        
-        scores_source_lifted, scores_target_lifted, nodes_features_proj_lifted = scores_source, scores_target, nodes_features_proj
-        
-        scores_per_edge = self.leakyReLU(scores_source_lifted + scores_target_lifted)
-        
-        nodes_features_proj_lifted_weighted = nodes_features_proj_lifted
+        scores_per_edge = self.leakyReLU(scores_source + scores_target_lifted)
+        attention_coefficients = self.neighborhood_aware_softmax(
+            scores_per_edge, edge_index[self.trg_nodes_dim], num_of_nodes)
+        nodes_features_proj_lifted_weighted = nodes_features_proj * attention_coefficients
         
         out_nodes_features = self.aggregate_neighbors(nodes_features_proj_lifted_weighted, edge_index, in_nodes_features, num_of_nodes)
 
         
-        out_nodes_features = self.skip_concat_bias(None, in_nodes_features, out_nodes_features)
-        return (out_nodes_features, edge_index, None)
+        out_nodes_features = self.skip_concat_bias(attention_coefficients, in_nodes_features, out_nodes_features)
+        return (out_nodes_features, edge_index, attention_coefficients)
 
    
     def neighborhood_aware_softmax(self, scores_per_edge, trg_index, num_of_nodes):

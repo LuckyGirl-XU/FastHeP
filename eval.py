@@ -8,7 +8,8 @@ from utils import *
 
 
 def eval_one_epoch(hint, fasthye, sampler, he_info, bs = 100):
-  val_acc, val_ap, val_f1, val_auc, val_neigh_time, val_network_time = [], [], [], [], [], []
+  all_scores, all_labels = [], []
+  val_neigh_time, val_network_time = [], []
   with torch.no_grad():
     fasthye = fasthye.eval()
     TEST_BATCH_SIZE = bs
@@ -18,7 +19,7 @@ def eval_one_epoch(hint, fasthye, sampler, he_info, bs = 100):
     idx_list = list(he_info.keys())
     for k in range(num_test_batch):
       s_idx = k * TEST_BATCH_SIZE
-      e_idx = min(num_test_instance-1, s_idx + TEST_BATCH_SIZE)
+      e_idx = min(num_test_instance, s_idx + TEST_BATCH_SIZE)
       if s_idx == e_idx:
         continue
       batch_idx = idx_list[s_idx:e_idx]
@@ -34,10 +35,15 @@ def eval_one_epoch(hint, fasthye, sampler, he_info, bs = 100):
       pred_label = pred_score > 0.5
       true_label = np.concatenate([np.ones(size), np.zeros(size)])
 
-      val_acc.append((pred_label.flatten() == true_label).mean())
-      val_ap.append(average_precision_score(true_label, pred_score))
-      val_f1.append(f1_score(true_label, pred_label))
-      val_auc.append(roc_auc_score(true_label, pred_score))
+      all_scores.append(pred_score)
+      all_labels.append(true_label)
       val_neigh_time.append(neigh_time)
       val_network_time.append(network_time)
-  return np.mean(val_acc), np.mean(val_ap), np.mean(val_f1), np.mean(val_auc), np.sum(val_neigh_time), np.sum(val_network_time)
+  pred_score = np.concatenate(all_scores)
+  true_label = np.concatenate(all_labels)
+  pred_label = pred_score > 0.5
+  val_acc = (pred_label.flatten() == true_label).mean()
+  val_ap = average_precision_score(true_label, pred_score)
+  val_f1 = f1_score(true_label, pred_label)
+  val_auc = roc_auc_score(true_label, pred_score)
+  return val_acc, val_ap, val_f1, val_auc, np.sum(val_neigh_time), np.sum(val_network_time)

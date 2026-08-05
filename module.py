@@ -8,11 +8,10 @@ import math
 from GAT import GAT
 from torch.utils.data import WeightedRandomSampler
 from torch.nn.utils.rnn import pad_sequence
-from Attention import *
 
 class FastHeP(torch.nn.Module):
   def __init__(self, n_feat, e_feat, memory_dim, total_nodes, get_checkpoint_path=None, get_ngh_store_path=None, get_self_rep_path=None, get_prev_raw_path=None, time_dim=64, pos_dim=0, n_head=1, num_neighbors=['1', '16'],
-      dropout=0.1, linear_out=False, verbosity=1, seed=1, n_hops=1, replace_prob=0.8, self_dim=100, ngh_dim=8, device=None):
+      dropout=0.1, linear_out=False, verbosity=1, seed=1, n_hops=1, replace_prob=0.8, self_dim=100, ngh_dim=8, neg_pos_mode='shared', time_mode='relative', joint_overlap=True, device=None):
     super(FastHeP, self).__init__()
     self.logger = logging.getLogger(__name__)
     self.dropout = dropout
@@ -55,10 +54,24 @@ class FastHeP(torch.nn.Module):
     self.memory_dim = memory_dim
     self.verbosity = verbosity
     self.nlb_node = False
+    if neg_pos_mode not in ('separate', 'shared'):
+      raise ValueError('neg_pos_mode must be either separate or shared')
+    self.neg_pos_mode = neg_pos_mode
+    if time_mode not in ('relative', 'absolute'):
+      raise ValueError('time_mode must be either relative or absolute')
+    self.time_mode = time_mode
+    self.joint_overlap = joint_overlap
+    self.hash_prime = 1000003
     
-    self.attn_dim = self.feat_dim + self.ngh_dim +1 
+    self.attn_dim = self.feat_dim + self.ngh_dim + 1 + int(self.joint_overlap)
     self.gat = GAT(1, [n_head], [self.attn_dim, self.feat_dim], add_skip_connection=False, bias=True,
                  dropout=dropout, log_attention_weights=False)
+    self.query_encoder = nn.Linear(self.self_dim, self.attn_dim, bias=False)
+    self.node_fusion = nn.Sequential(
+      nn.Linear(self.self_dim + self.feat_dim, self.feat_dim),
+      nn.ReLU(),
+      nn.Linear(self.feat_dim, self.feat_dim)
+    )
     self.total_nodes = total_nodes + 1
     self.replace_prob = replace_prob
     self.self_rep_linear = nn.Linear(self.self_dim + self.time_dim, self.self_dim, bias=False)
@@ -81,6 +94,12 @@ class FastHeP(torch.nn.Module):
       ngh_store = torch.cat((raw_store, nn.init.xavier_uniform_(hidden_store)), -1).to(self.device)
       ngh_stores.append(ngh_store)
     self.neighborhood_store = ngh_stores
+    # The zero-hop table is the self entry for every node. Initializing it
+    # once avoids mutating the store merely because a node was sampled as a
+    # negative candidate.
+    node_ids = torch.arange(self.total_nodes, device=self.device)
+    self_slots = node_ids * self.num_neighbors[0] + self.ncache_hash(node_ids, 0)
+    self.neighborhood_store[0][self_slots, self.ngh_id_idx] = node_ids.float()
     self.self_rep = torch.zeros(self.total_nodes, self.self_dim).to(self.device)
     self.prev_raw = torch.zeros(self.total_nodes, 2).to(self.device)
   
@@ -132,10 +151,7 @@ class FastHeP(torch.nn.Module):
     batch_idx = torch.arange(batch_size * 2, device=self.device)
     
     neigh_start_time = time.time()
-    self.neighborhood_store[0][idx_th, 0] = idx_th.float()
-    
-   
-    
+
     h0_pos_bit = self.position_bits(2 * batch_size, hop=0)
     updated_mem_h0 = self.batch_fetch_ncaches(idx_th, cut_time_th.repeat(2), hop=0)
     updated_mem_h0_with_pos = torch.cat((updated_mem_h0, h0_pos_bit.unsqueeze(1)), -1)
@@ -168,19 +184,37 @@ class FastHeP(torch.nn.Module):
   
     pos_raw = updated_mem[:, -1]
     src_pos_raw = pos_raw[0:src_nghs]
-    bad_pos_raw = pos_raw[src_nghs:src_nghs+bad_nghs].to(torch.int64) << 2
+    bad_pos_raw = pos_raw[src_nghs:src_nghs+bad_nghs].to(torch.int64)
+    if self.neg_pos_mode == 'separate':
+      bad_pos_raw = bad_pos_raw << 2
   
     pos_raw = torch.cat((src_pos_raw, bad_pos_raw), -1)
-    hidden_states = torch.cat((node_features, updated_mem[:, self.ngh_rep_idx[0]:self.ngh_rep_idx[1]], pos_raw.unsqueeze(1)), -1)
+    hidden_parts = [
+      node_features,
+      updated_mem[:, self.ngh_rep_idx[0]:self.ngh_rep_idx[1]],
+      pos_raw.unsqueeze(1)
+    ]
+    if self.joint_overlap:
+      overlap = self.joint_overlap_feature(
+        ngh_id, sparse_idx, he_offset_l, batch_size)
+      hidden_parts.append(overlap.unsqueeze(1))
+    hidden_states = torch.cat(hidden_parts, -1)
     neigh_end_time = time.time()-neigh_start_time
 
     start_mp_time = time.time()
-    src_self_rep = self.updated_self_rep(src_th)
-    bad_self_rep = self.updated_self_rep(bad_th)
+    # Query states are computed symmetrically from history for positive and
+    # negative candidates. The current positive event is written only after
+    # its score has been produced.
+    src_self_rep = self.updated_self_rep(src_th, cut_time_th)
+    bad_self_rep = self.updated_self_rep(bad_th, cut_time_th)
+    query_rep = torch.cat((src_self_rep, bad_self_rep), 0)
+    query_features = self.query_encoder(query_rep)
     
     ngh_and_batch_id = torch.cat((ngh_id.unsqueeze(1), sparse_idx.unsqueeze(1)), -1)
     
-    p_score, n_score = self.forward(ngh_and_batch_id, hidden_states, batch_size, he_offset_l)
+    p_score, n_score = self.forward(
+      ngh_and_batch_id, hidden_states, query_features, query_rep,
+      batch_size, he_offset_l)
  
     
     self.self_rep[src_th] = src_self_rep.detach()
@@ -204,44 +238,103 @@ class FastHeP(torch.nn.Module):
 
 
   
-  def updated_self_rep(self, node_id):
+  def updated_self_rep(self, node_id, curr_time):
     self_store = self.prev_raw[node_id]
-    oppo_id = self_store[:, self.ngh_id_idx].long()
-    ts_raw = self_store[:,self.ts_raw_idx]
+    prev_time = self_store[:, self.ts_raw_idx]
+    if self.time_mode == 'relative':
+      ts_raw = torch.clamp(curr_time - prev_time, min=0)
+      ts_raw = torch.where(prev_time != 0, ts_raw, torch.zeros_like(ts_raw))
+    else:
+      ts_raw = prev_time
     ts_feat = self.time_encoder(ts_raw)
     prev_self_rep = self.self_rep[node_id]
-    prev_oppo_rep = self.self_rep[oppo_id]
-    bmp_1 = torch.cat((prev_oppo_rep, ts_feat), -1)
+    bmp_1 = torch.cat((prev_self_rep, ts_feat), -1)
     bmp = self.self_rep_linear(bmp_1)
     updated_self_rep = self.self_aggregator(bmp, prev_self_rep)
     return updated_self_rep
 
   def update_memory(self, src_th, he_offset_l, cut_time_th, updated_mem_h0, updated_mem_h1, batch_size):
-    he_offset_l = he_offset_l[:-1]
-    src_idx = src_th[he_offset_l]
-    tgt_idx = src_th[he_offset_l+1]
-    cut_time_idx = cut_time_th[he_offset_l].repeat(2)
-    ori_idx = torch.cat((src_idx, tgt_idx), 0)
-    opp_th = torch.cat((tgt_idx, src_idx), 0)
-    batch_id = torch.arange(src_idx.shape[0]*2, device=self.device)
     if self.n_hops > 0:
-      updated_mem_h1 = updated_mem_h1.detach()[:batch_size * self.num_neighbors[1]]
-      updated_mem_h1 = updated_mem_h1[(batch_id * self.num_neighbors[1] + self.ncache_hash(opp_th, 1))]
-      ngh_id_is_match = (updated_mem_h1[:, self.ngh_id_idx] == opp_th).unsqueeze(1).repeat(1, self.memory_dim)
-      updated_mem_h1 = updated_mem_h1 * ngh_id_is_match
-      candidate_ncaches = torch.cat((opp_th.unsqueeze(1), cut_time_idx.unsqueeze(1), updated_mem_h1[:, self.ngh_rep_idx[0]:self.ngh_rep_idx[1]]), -1)
-      self.update_ncaches(ori_idx, candidate_ncaches, 1)
+      center_ids, neighbor_ids, center_positions, pair_times = self.hyperedge_pairs(
+        src_th, he_offset_l, cut_time_th)
+      if center_ids.numel() > 0:
+        h1_store = updated_mem_h1.detach()[:batch_size * self.num_neighbors[1]]
+        h1_store = h1_store.view(batch_size, self.num_neighbors[1], self.memory_dim)
+        slots = self.ncache_hash(neighbor_ids, 1)
+        previous = h1_store[center_positions, slots]
+        is_match = (previous[:, self.ngh_id_idx] == neighbor_ids).unsqueeze(1)
+        previous_rep = previous[:, self.ngh_rep_idx[0]:self.ngh_rep_idx[1]] * is_match
+        candidate_ncaches = torch.cat((
+          neighbor_ids.unsqueeze(1), pair_times.unsqueeze(1), previous_rep), -1)
+        self.update_ncaches(center_ids, candidate_ncaches, 1)
+
     # Update self
-    updated_mem_h0 = updated_mem_h0.detach()[:batch_size * self.num_neighbors[0]]
-    candidate_ncaches = torch.cat((src_th.unsqueeze(1), cut_time_th.unsqueeze(1), updated_mem_h0[:, self.ngh_rep_idx[0]:self.ngh_rep_idx[1]]), -1)
+    h0_store = updated_mem_h0.detach()[:batch_size * self.num_neighbors[0]]
+    h0_store = h0_store.view(batch_size, self.num_neighbors[0], self.memory_dim)
+    batch_positions = torch.arange(batch_size, device=self.device)
+    self_slots = self.ncache_hash(src_th, 0)
+    previous_self = h0_store[batch_positions, self_slots]
+    candidate_ncaches = torch.cat((
+      src_th.unsqueeze(1), cut_time_th.unsqueeze(1),
+      previous_self[:, self.ngh_rep_idx[0]:self.ngh_rep_idx[1]]), -1)
     self.update_ncaches(src_th, candidate_ncaches, 0)
+
+  def hyperedge_pairs(self, src_th, he_offset_l, cut_time_th):
+    """Return every directed co-member pair in each positive hyperedge."""
+    center_ids = []
+    neighbor_ids = []
+    center_positions = []
+    pair_times = []
+    for start, end in zip(he_offset_l[:-1].tolist(), he_offset_l[1:].tolist()):
+      cardinality = end - start
+      if cardinality < 2:
+        continue
+      nodes = src_th[start:end]
+      positions = torch.arange(start, end, device=self.device)
+      centers = nodes.repeat_interleave(cardinality)
+      neighbors = nodes.repeat(cardinality)
+      center_pos = positions.repeat_interleave(cardinality)
+      neighbor_pos = positions.repeat(cardinality)
+      non_self = center_pos != neighbor_pos
+      center_ids.append(centers[non_self])
+      neighbor_ids.append(neighbors[non_self])
+      center_positions.append(center_pos[non_self])
+      pair_times.append(cut_time_th[center_pos[non_self]])
+
+    if not center_ids:
+      empty_long = torch.empty(0, dtype=torch.long, device=self.device)
+      empty_float = torch.empty(0, dtype=cut_time_th.dtype, device=self.device)
+      return empty_long, empty_long, empty_long, empty_float
+    return (torch.cat(center_ids), torch.cat(neighbor_ids),
+            torch.cat(center_positions), torch.cat(pair_times))
+
+  def joint_overlap_feature(self, ngh_id, sparse_idx, he_offset_l, batch_size):
+    """Fraction of candidate members whose caches contain each neighbor.
+
+    This is a label-independent high-order structural signal. Positive and
+    negative candidates use exactly the same computation and value range.
+    """
+    cardinalities = he_offset_l[1:] - he_offset_l[:-1]
+    num_hyperedges = cardinalities.shape[0]
+    node_to_hyperedge = torch.repeat_interleave(
+      torch.arange(num_hyperedges, device=self.device), cardinalities)
+    if node_to_hyperedge.shape[0] != batch_size:
+      raise ValueError('hyperedge offsets do not match the flattened node batch')
+    node_to_hyperedge = torch.cat((
+      node_to_hyperedge, node_to_hyperedge + num_hyperedges), 0)
+    edge_hyperedge = node_to_hyperedge.index_select(0, sparse_idx)
+    keys = torch.stack((edge_hyperedge, ngh_id), -1)
+    _, inverse, counts = torch.unique(
+      keys, dim=0, return_inverse=True, return_counts=True)
+    candidate_cardinalities = torch.cat((cardinalities, cardinalities), 0)
+    denominators = candidate_cardinalities.index_select(
+      0, edge_hyperedge).to(dtype=torch.float)
+    return counts.index_select(0, inverse).to(dtype=torch.float) / denominators
 
 
   def ncache_hash(self, ngh_id, hop):
     ngh_id = ngh_id.long()
-    if self.nlb_node:
-      return ((ngh_id * (self.seed % 100) + ngh_id * ngh_id * ((self.seed % 100) + 1)) % self.num_neighbors[hop]).long()
-    return ((ngh_id * (int(random.random() * 100)) + ngh_id * ngh_id * (int(random.random() * 100) + 1)) % self.num_neighbors[hop]).long()
+    return ((ngh_id * self.hash_prime) % self.num_neighbors[hop]).long()
 
   def update_ncaches(self, self_id, candidate_ncaches, hop):
     if self.num_neighbors[hop] == 0:
@@ -249,10 +342,11 @@ class FastHeP(torch.nn.Module):
     ngh_id = candidate_ncaches[:, self.ngh_id_idx]
     idx = self_id * self.num_neighbors[hop] + self.ncache_hash(ngh_id, hop)
     is_occupied = torch.logical_and(self.neighborhood_store[hop][idx,self.ngh_id_idx] != 0, self.neighborhood_store[hop][idx,self.ngh_id_idx] != ngh_id)
-    should_replace =  (is_occupied * torch.rand(is_occupied.shape[0], device=self.device)) < self.replace_prob
-    idx *= should_replace
-    idx *= ngh_id != 0
-    self.neighborhood_store[hop][idx] = candidate_ncaches
+    should_replace = torch.logical_or(
+      torch.logical_not(is_occupied),
+      torch.rand(is_occupied.shape[0], device=self.device) < self.replace_prob)
+    should_write = torch.logical_and(should_replace, ngh_id != 0)
+    self.neighborhood_store[hop][idx[should_write]] = candidate_ncaches[should_write]
 
   def store_memory(self, n_id, e_pos_th, ts_th, e_th, agg_p):
     prev_data = torch.cat((n_id.unsqueeze(1), e_th.unsqueeze(1), ts_th.unsqueeze(1), agg_p), -1)
@@ -260,10 +354,15 @@ class FastHeP(torch.nn.Module):
 
   def batch_fetch_ncaches(self, ori_idx, curr_time, hop):
     ngh = self.neighborhood_store[hop].view(self.total_nodes, self.num_neighbors[hop], self.memory_dim)[ori_idx].view(ori_idx.shape[0] * (self.num_neighbors[hop]), self.memory_dim)
+    curr_time = curr_time.repeat_interleave(self.num_neighbors[hop])
     ngh_id = ngh[:,self.ngh_id_idx].long()
     ngh_ts_raw = ngh[:,self.ts_raw_idx]
     prev_ngh_rep = ngh[:,self.ngh_rep_idx[0]:self.ngh_rep_idx[1]]
-    ts_feat = self.time_encoder(ngh_ts_raw)
+    if self.time_mode == 'relative':
+      encoded_time = torch.clamp(curr_time - ngh_ts_raw, min=0)
+    else:
+      encoded_time = ngh_ts_raw
+    ts_feat = self.time_encoder(encoded_time)
     ngh_self_rep = self.self_rep[ngh_id]
     updated_self_rep = self.ngh_aggregator(self.ngh_rep_linear(torch.cat((ngh_self_rep, ts_feat), -1)), prev_ngh_rep)
     updated_self_rep *= (ngh_ts_raw != 0).unsqueeze(1).repeat(1, self.ngh_dim)
@@ -271,12 +370,19 @@ class FastHeP(torch.nn.Module):
     updated_mem = torch.cat((ngh[:, :self.num_raw], updated_self_rep), -1)
     return updated_mem
 
-  def forward(self, ngh_and_batch_id, feat, bs, he_offset_l):
+  def forward(self, ngh_and_batch_id, feat, query_features, query_rep, bs, he_offset_l):
     edge_idx = ngh_and_batch_id.T
-    node_embed, _, attn_score = self.gat((feat, edge_idx.long(), 2*bs))
+    node_embed, _, attn_score = self.gat((
+      feat, edge_idx.long(), 2*bs, query_features))
+    node_embed = self.node_fusion(torch.cat((query_rep, node_embed), -1))
 
-    hy_p_embed = self.set_embedding(node_embed[:bs], he_offset_l)
-    hy_n_embed = self.set_embedding(node_embed[bs:], he_offset_l)
+    hy_p_tokens = self.set_embedding.pool(node_embed[:bs], he_offset_l)
+    hy_n_tokens = self.set_embedding.pool(node_embed[bs:], he_offset_l)
+    num_hyperedges = hy_p_tokens.shape[0]
+    hyperedge_tokens = torch.cat((hy_p_tokens, hy_n_tokens), 0)
+    hyperedge_embed = self.set_embedding.attend(hyperedge_tokens)
+    hy_p_embed = hyperedge_embed[:num_hyperedges]
+    hy_n_embed = hyperedge_embed[num_hyperedges:]
 
 
     p_score = self.out_layer(hy_p_embed).squeeze_(dim=-1)
@@ -289,10 +395,7 @@ class FastHeP(torch.nn.Module):
 
   
   def init_deep_sets(self):
-    if self.pos_dim > 0: 
-      return Hyperedge_Attention( self.feat_dim + self.pos_dim -1, 32, self.feat_dim) 
-    else: 
-      return Hyperedge_Attention(self.feat_dim, 64, self.feat_dim) 
+    return Hyperedge_Attention(self.feat_dim, 64, self.feat_dim)
 
   def init_self_aggregator(self):
     return FeatureEncoderGRU(self.self_dim, self.self_dim, self.dropout)
@@ -323,25 +426,31 @@ class Hyperedge_Attention(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU()
         )
-        self.rho = nn.Sequential(
-            nn.Linear(hidden_dim, output_dim),
+        self.output_projection = (
+            nn.Identity() if hidden_dim == output_dim
+            else nn.Linear(hidden_dim, output_dim)
         )
-        self.hyper_attention = nn.MultiheadAttention(embed_dim=64, num_heads=1)
+        self.hyper_attention = nn.MultiheadAttention(
+            embed_dim=output_dim, num_heads=1, batch_first=True)
         
-    def hyper2token(self, x, offset):
+    def pool(self, x, offset):
         x = self.phi(x)  
         slice_sizes = offset[1:] - offset[:-1]
         sliced_tem = torch.split(x , slice_sizes.tolist())
+        # Eq. (4): MLP followed by mean pooling keeps hyperedge embeddings
+        # invariant to node order and avoids encoding cardinality by scale.
+        tokens = torch.stack([t.mean(dim=0) for t in sliced_tem])
+        return self.output_projection(tokens)
 
-        slices_sum = [t.sum(dim=0) for t in sliced_tem]
-        tokens = torch.stack(slices_sum).unsqueeze(0)
-        return tokens
+    def attend(self, tokens):
+        # Eq. (5): treat the hyperedges as the sequence and the whole set as
+        # one batch, so attention actually models correlations among them.
+        tokens = tokens.unsqueeze(0)
+        attention_output = self.hyper_attention(tokens, tokens, tokens)[0]
+        return (tokens + attention_output).squeeze(0)
     
     def forward(self, x, offset):
-        
-        hyper_tokens = self.hyper2token(x, offset)
-        x= hyper_tokens+ self.hyper_attention(hyper_tokens,hyper_tokens,hyper_tokens)[0].squeeze(0)
-        return x
+        return self.attend(self.pool(x, offset))
     
     
 class TimeEncode(torch.nn.Module):
@@ -353,7 +462,6 @@ class TimeEncode(torch.nn.Module):
     self.basis_freq = torch.nn.Parameter((torch.from_numpy(1 / 10 ** np.linspace(0, 9, self.time_dim))).float())
     self.phase = torch.nn.Parameter(torch.zeros(self.time_dim).float())
 
-  @torch.no_grad()
   def forward(self, ts):
     batch_size = ts.size(0)
 
