@@ -14,6 +14,7 @@ def set_up_logger(args, sys_argv):
   logger = logging.getLogger()
   logger.setLevel(logging.DEBUG)
   file_path = 'log/{}.log'.format(runtime_id) 
+  os.makedirs(os.path.dirname(file_path), exist_ok=True)
   fh = logging.FileHandler(file_path)
   fh.setLevel(logging.DEBUG)
   ch = logging.StreamHandler()
